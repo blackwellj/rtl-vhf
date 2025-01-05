@@ -1,5 +1,3 @@
-import os
-import platform
 import tkinter as tk
 from tkinter import ttk, messagebox
 from rtlsdr import RtlSdr
@@ -8,7 +6,7 @@ import numpy as np
 import threading
 from scipy.signal import decimate
 
-# Full UK Marine VHF Channel Frequencies (MHz)
+# Marine VHF Channel Frequencies (MHz)
 VHF_CHANNELS = {
     "Channel 0 (156.000 MHz)": 156.000,
     "Channel 1 (156.050 MHz)": 156.050,
@@ -72,6 +70,7 @@ VHF_CHANNELS = {
     "Lifeguard L1 (161.425 MHz)": 161.425,  # RNLI Lifeguards
 }
 
+
 class VHFListenerApp:
     def __init__(self, root):
         self.root = root
@@ -81,7 +80,7 @@ class VHFListenerApp:
         self.sdr = None
         self.audio_stream = None
         self.running = False
-        self.audio_device_index = None  # Default to None (use system's default device)
+        self.audio_device_index = None  # Default to None (use default device)
 
         # PyAudio Instance
         self.p = pyaudio.PyAudio()
@@ -92,7 +91,7 @@ class VHFListenerApp:
     def setup_gui(self):
         ttk.Label(self.root, text="Select VHF Channel:").grid(row=0, column=0, pady=10, padx=10)
         self.channel_var = tk.StringVar()
-        self.channel_var.set("Channel 16 (156.800 MHz)")
+        self.channel_var.set("Channel 16 (156.8 MHz)")
         self.channel_menu = ttk.Combobox(self.root, textvariable=self.channel_var, values=list(VHF_CHANNELS.keys()))
         self.channel_menu.grid(row=0, column=1, pady=10, padx=10)
 
@@ -104,6 +103,30 @@ class VHFListenerApp:
 
         self.settings_btn = ttk.Button(self.root, text="Audio Settings", command=self.audio_settings)
         self.settings_btn.grid(row=3, column=0, columnspan=2, pady=10)
+
+    def audio_settings(self):
+        settings_window = tk.Toplevel(self.root)
+        settings_window.title("Audio Settings")
+        settings_window.geometry("400x300")
+
+        ttk.Label(settings_window, text="Select Audio Output Device:").pack(pady=10)
+        device_list = [self.p.get_device_info_by_index(i)['name'] for i in range(self.p.get_device_count())]
+        self.device_var = tk.StringVar(value=device_list[0] if device_list else "Default")
+        device_menu = ttk.Combobox(settings_window, textvariable=self.device_var, values=device_list, width=50)
+        device_menu.pack(pady=10)
+
+        def save_settings():
+            selected_device_name = self.device_var.get()
+            for i in range(self.p.get_device_count()):
+                if self.p.get_device_info_by_index(i)['name'] == selected_device_name:
+                    self.audio_device_index = i
+                    messagebox.showinfo("Settings", f"Audio device set to: {selected_device_name}")
+                    settings_window.destroy()
+                    return
+            messagebox.showerror("Settings", "Selected audio device not found.")
+
+        save_btn = ttk.Button(settings_window, text="Save", command=save_settings)
+        save_btn.pack(pady=20)
 
     def start_listening(self):
         try:
@@ -159,11 +182,13 @@ class VHFListenerApp:
         finally:
             self.stop_listening()
 
+
 def main():
     root = tk.Tk()
     app = VHFListenerApp(root)
     root.protocol("WM_DELETE_WINDOW", app.stop_listening)
     root.mainloop()
+
 
 if __name__ == "__main__":
     main()
