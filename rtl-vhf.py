@@ -1,3 +1,5 @@
+import os
+import platform
 import tkinter as tk
 from tkinter import ttk, messagebox
 from rtlsdr import RtlSdr
@@ -18,7 +20,6 @@ VHF_CHANNELS = {
     # Add more channels as needed
 }
 
-
 class VHFListenerApp:
     def __init__(self, root):
         self.root = root
@@ -28,7 +29,7 @@ class VHFListenerApp:
         self.sdr = None
         self.audio_stream = None
         self.running = False
-        self.audio_device_index = None  # Default to None (use default device)
+        self.audio_device_index = None  # Default to None (use system's default device)
 
         # PyAudio Instance
         self.p = pyaudio.PyAudio()
@@ -85,6 +86,7 @@ class VHFListenerApp:
             self.sdr.sample_rate = 2.048e6  # RTL-SDR's supported sample rate
             self.sdr.center_freq = frequency
             self.sdr.gain = 'auto'
+            self.sdr.set_direct_sampling(0)  # Disable direct sampling for VHF frequencies
 
             self.running = True
             self.start_btn.config(state=tk.DISABLED)
@@ -131,6 +133,11 @@ class VHFListenerApp:
             self.stop_listening()
 
 def main():
+    # Cross-platform ALSA noise suppression
+    if platform.system() == "Linux":
+        os.environ["ALSA_CARD"] = "0"
+        os.environ["PYTHONWARNINGS"] = "ignore"
+
     root = tk.Tk()
     app = VHFListenerApp(root)
     root.protocol("WM_DELETE_WINDOW", app.stop_listening)
