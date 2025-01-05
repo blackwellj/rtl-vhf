@@ -4,6 +4,7 @@ from rtlsdr import RtlSdr
 import pyaudio
 import numpy as np
 import threading
+from scipy.signal import decimate
 
 # Full UK Marine VHF Channel Frequencies (MHz)
 VHF_CHANNELS = {
@@ -121,8 +122,11 @@ class VHFListenerApp:
                 # Calculate signal level
                 signal_level = 10 * np.log10(np.mean(np.abs(samples)**2))
                 self.signal_levels[channel_name].set(f"Signal: {signal_level:.1f} dB")
-                # Downsample for playback
-                filtered_samples = decimate(samples, decimation_factor, zero_phase=True)
+                # Downsample for playback (use decimate or slicing as fallback)
+                try:
+                    filtered_samples = decimate(samples, decimation_factor, zero_phase=True)
+                except Exception:
+                    filtered_samples = samples[::decimation_factor]  # Simple downsampling
                 audio_data = np.real(filtered_samples).astype(np.int16).tobytes()
                 audio_stream.write(audio_data)
         except Exception as e:
