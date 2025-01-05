@@ -1,3 +1,4 @@
-pyrtlsdr
-pyaudio
 numpy
+pyaudio
+scipy
+rtlsdr
