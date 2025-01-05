@@ -1,4 +1,3 @@
-import os
 import tkinter as tk
 from tkinter import ttk, messagebox
 from rtlsdr import RtlSdr
@@ -6,41 +5,51 @@ import pyaudio
 import numpy as np
 import threading
 
+# Marine VHF Channel Frequencies (MHz)
+VHF_CHANNELS = {
+    "Channel 16 (156.8 MHz)": 156.8,
+    "Channel 06 (156.3 MHz)": 156.3,
+    "Channel 09 (156.45 MHz)": 156.45,
+    "Channel 10 (156.5 MHz)": 156.5,
+    "Channel 12 (156.6 MHz)": 156.6,
+    "Channel 14 (156.7 MHz)": 156.7,
+    "Channel 67 (156.375 MHz)": 156.375,
+    # Add more channels as needed
+}
+
 class VHFListenerApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Marine VHF Listener")
         self.root.geometry("400x300")
-        
+
         self.sdr = None
         self.audio_stream = None
         self.running = False
-        
+
         # GUI Elements
         self.setup_gui()
 
     def setup_gui(self):
-        ttk.Label(self.root, text="Center Frequency (MHz):").grid(row=0, column=0, pady=10, padx=10)
-        self.freq_entry = ttk.Entry(self.root)
-        self.freq_entry.grid(row=0, column=1, pady=10, padx=10)
-
-        ttk.Label(self.root, text="Sample Rate (MS/s):").grid(row=1, column=0, pady=10, padx=10)
-        self.sr_entry = ttk.Entry(self.root)
-        self.sr_entry.insert(0, "2.048")
-        self.sr_entry.grid(row=1, column=1, pady=10, padx=10)
+        ttk.Label(self.root, text="Select VHF Channel:").grid(row=0, column=0, pady=10, padx=10)
+        self.channel_var = tk.StringVar()
+        self.channel_var.set("Channel 16 (156.8 MHz)")
+        self.channel_menu = ttk.Combobox(self.root, textvariable=self.channel_var, values=list(VHF_CHANNELS.keys()))
+        self.channel_menu.grid(row=0, column=1, pady=10, padx=10)
 
         self.start_btn = ttk.Button(self.root, text="Start Listening", command=self.start_listening)
-        self.start_btn.grid(row=2, column=0, columnspan=2, pady=10)
+        self.start_btn.grid(row=1, column=0, columnspan=2, pady=10)
 
         self.stop_btn = ttk.Button(self.root, text="Stop Listening", command=self.stop_listening, state=tk.DISABLED)
-        self.stop_btn.grid(row=3, column=0, columnspan=2, pady=10)
+        self.stop_btn.grid(row=2, column=0, columnspan=2, pady=10)
 
     def start_listening(self):
         try:
-            frequency = float(self.freq_entry.get()) * 1e6
-            sample_rate = float(self.sr_entry.get()) * 1e6
+            selected_channel = self.channel_var.get()
+            frequency = VHF_CHANNELS[selected_channel] * 1e6  # Convert MHz to Hz
+
             self.sdr = RtlSdr()
-            self.sdr.sample_rate = sample_rate
+            self.sdr.sample_rate = 2.048e6  # Fixed sample rate for Marine VHF
             self.sdr.center_freq = frequency
             self.sdr.gain = 'auto'
 
