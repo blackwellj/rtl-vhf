@@ -18,6 +18,7 @@ VHF_CHANNELS = {
     # Add more channels as needed
 }
 
+
 class VHFListenerApp:
     def __init__(self, root):
         self.root = root
@@ -27,6 +28,10 @@ class VHFListenerApp:
         self.sdr = None
         self.audio_stream = None
         self.running = False
+        self.audio_device_index = None  # Default to None (use default device)
+
+        # PyAudio Instance
+        self.p = pyaudio.PyAudio()
 
         # GUI Elements
         self.setup_gui()
@@ -43,6 +48,33 @@ class VHFListenerApp:
 
         self.stop_btn = ttk.Button(self.root, text="Stop Listening", command=self.stop_listening, state=tk.DISABLED)
         self.stop_btn.grid(row=2, column=0, columnspan=2, pady=10)
+
+        self.settings_btn = ttk.Button(self.root, text="Audio Settings", command=self.audio_settings)
+        self.settings_btn.grid(row=3, column=0, columnspan=2, pady=10)
+
+    def audio_settings(self):
+        settings_window = tk.Toplevel(self.root)
+        settings_window.title("Audio Settings")
+        settings_window.geometry("400x300")
+
+        ttk.Label(settings_window, text="Select Audio Output Device:").pack(pady=10)
+        device_list = [self.p.get_device_info_by_index(i)['name'] for i in range(self.p.get_device_count())]
+        self.device_var = tk.StringVar(value=device_list[0] if device_list else "Default")
+        device_menu = ttk.Combobox(settings_window, textvariable=self.device_var, values=device_list, width=50)
+        device_menu.pack(pady=10)
+
+        def save_settings():
+            selected_device_name = self.device_var.get()
+            for i in range(self.p.get_device_count()):
+                if self.p.get_device_info_by_index(i)['name'] == selected_device_name:
+                    self.audio_device_index = i
+                    messagebox.showinfo("Settings", f"Audio device set to: {selected_device_name}")
+                    settings_window.destroy()
+                    return
+            messagebox.showerror("Settings", "Selected audio device not found.")
+
+        save_btn = ttk.Button(settings_window, text="Save", command=save_settings)
+        save_btn.pack(pady=20)
 
     def start_listening(self):
         try:
@@ -75,15 +107,15 @@ class VHFListenerApp:
 
     def stream_audio(self):
         try:
-            p = pyaudio.PyAudio()
             audio_rate = 48000  # Output sample rate
             decimation_factor = int(self.sdr.sample_rate // audio_rate)
 
-            self.audio_stream = p.open(
+            self.audio_stream = self.p.open(
                 format=pyaudio.paInt16,
                 channels=1,
                 rate=audio_rate,
-                output=True
+                output=True,
+                output_device_index=self.audio_device_index  # Use selected or default device
             )
 
             while self.running:
