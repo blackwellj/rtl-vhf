@@ -8,16 +8,68 @@ import numpy as np
 import threading
 from scipy.signal import decimate
 
-# Marine VHF Channel Frequencies (MHz)
+# Full UK Marine VHF Channel Frequencies (MHz)
 VHF_CHANNELS = {
-    "Channel 16 (156.8 MHz)": 156.8,
-    "Channel 06 (156.3 MHz)": 156.3,
-    "Channel 09 (156.45 MHz)": 156.45,
-    "Channel 10 (156.5 MHz)": 156.5,
-    "Channel 12 (156.6 MHz)": 156.6,
-    "Channel 14 (156.7 MHz)": 156.7,
+    "Channel 0 (156.000 MHz)": 156.000,
+    "Channel 1 (156.050 MHz)": 156.050,
+    "Channel 2 (156.100 MHz)": 156.100,
+    "Channel 3 (156.150 MHz)": 156.150,
+    "Channel 4 (156.200 MHz)": 156.200,
+    "Channel 5 (156.250 MHz)": 156.250,
+    "Channel 6 (156.300 MHz)": 156.300,
+    "Channel 7 (156.350 MHz)": 156.350,
+    "Channel 8 (156.400 MHz)": 156.400,
+    "Channel 9 (156.450 MHz)": 156.450,
+    "Channel 10 (156.500 MHz)": 156.500,
+    "Channel 11 (156.550 MHz)": 156.550,
+    "Channel 12 (156.600 MHz)": 156.600,
+    "Channel 13 (156.650 MHz)": 156.650,
+    "Channel 14 (156.700 MHz)": 156.700,
+    "Channel 15 (156.750 MHz)": 156.750,
+    "Channel 16 (156.800 MHz)": 156.800,  # Distress channel
+    "Channel 17 (156.850 MHz)": 156.850,
+    "Channel 18 (156.900 MHz)": 156.900,
+    "Channel 19 (156.950 MHz)": 156.950,
+    "Channel 20 (157.000 MHz)": 157.000,
+    "Channel 21 (157.050 MHz)": 157.050,
+    "Channel 22 (157.100 MHz)": 157.100,
+    "Channel 23 (157.150 MHz)": 157.150,
+    "Channel 24 (157.200 MHz)": 157.200,
+    "Channel 25 (157.250 MHz)": 157.250,
+    "Channel 26 (157.300 MHz)": 157.300,
+    "Channel 27 (157.350 MHz)": 157.350,
+    "Channel 28 (157.400 MHz)": 157.400,
+    "Channel 60 (156.025 MHz)": 156.025,
+    "Channel 61 (156.075 MHz)": 156.075,
+    "Channel 62 (156.125 MHz)": 156.125,
+    "Channel 63 (156.175 MHz)": 156.175,
+    "Channel 64 (156.225 MHz)": 156.225,
+    "Channel 65 (156.275 MHz)": 156.275,
+    "Channel 66 (156.325 MHz)": 156.325,
     "Channel 67 (156.375 MHz)": 156.375,
-    # Add more channels as needed
+    "Channel 68 (156.425 MHz)": 156.425,
+    "Channel 69 (156.475 MHz)": 156.475,
+    "Channel 70 (156.525 MHz)": 156.525,  # Digital Selective Calling (DSC)
+    "Channel 71 (156.575 MHz)": 156.575,
+    "Channel 72 (156.625 MHz)": 156.625,
+    "Channel 73 (156.675 MHz)": 156.675,
+    "Channel 74 (156.725 MHz)": 156.725,
+    "Channel 75 (156.775 MHz)": 156.775,
+    "Channel 76 (156.825 MHz)": 156.825,
+    "Channel 77 (156.875 MHz)": 156.875,
+    "Channel 78 (156.925 MHz)": 156.925,
+    "Channel 79 (156.975 MHz)": 156.975,
+    "Channel 80 (157.025 MHz)": 157.025,
+    "Channel 81 (157.075 MHz)": 157.075,
+    "Channel 82 (157.125 MHz)": 157.125,
+    "Channel 83 (157.175 MHz)": 157.175,
+    "Channel 84 (157.225 MHz)": 157.225,
+    "Channel 85 (157.275 MHz)": 157.275,
+    "Channel 86 (157.325 MHz)": 157.325,
+    "Channel 87 (157.375 MHz)": 157.375,
+    "Channel 88 (157.425 MHz)": 157.425,
+    "Channel 99 (157.550 MHz)": 157.550,  # Search and Rescue
+    "Lifeguard L1 (161.425 MHz)": 161.425,  # RNLI Lifeguards
 }
 
 class VHFListenerApp:
@@ -40,7 +92,7 @@ class VHFListenerApp:
     def setup_gui(self):
         ttk.Label(self.root, text="Select VHF Channel:").grid(row=0, column=0, pady=10, padx=10)
         self.channel_var = tk.StringVar()
-        self.channel_var.set("Channel 16 (156.8 MHz)")
+        self.channel_var.set("Channel 16 (156.800 MHz)")
         self.channel_menu = ttk.Combobox(self.root, textvariable=self.channel_var, values=list(VHF_CHANNELS.keys()))
         self.channel_menu.grid(row=0, column=1, pady=10, padx=10)
 
@@ -53,30 +105,6 @@ class VHFListenerApp:
         self.settings_btn = ttk.Button(self.root, text="Audio Settings", command=self.audio_settings)
         self.settings_btn.grid(row=3, column=0, columnspan=2, pady=10)
 
-    def audio_settings(self):
-        settings_window = tk.Toplevel(self.root)
-        settings_window.title("Audio Settings")
-        settings_window.geometry("400x300")
-
-        ttk.Label(settings_window, text="Select Audio Output Device:").pack(pady=10)
-        device_list = [self.p.get_device_info_by_index(i)['name'] for i in range(self.p.get_device_count())]
-        self.device_var = tk.StringVar(value=device_list[0] if device_list else "Default")
-        device_menu = ttk.Combobox(settings_window, textvariable=self.device_var, values=device_list, width=50)
-        device_menu.pack(pady=10)
-
-        def save_settings():
-            selected_device_name = self.device_var.get()
-            for i in range(self.p.get_device_count()):
-                if self.p.get_device_info_by_index(i)['name'] == selected_device_name:
-                    self.audio_device_index = i
-                    messagebox.showinfo("Settings", f"Audio device set to: {selected_device_name}")
-                    settings_window.destroy()
-                    return
-            messagebox.showerror("Settings", "Selected audio device not found.")
-
-        save_btn = ttk.Button(settings_window, text="Save", command=save_settings)
-        save_btn.pack(pady=20)
-
     def start_listening(self):
         try:
             selected_channel = self.channel_var.get()
@@ -86,7 +114,6 @@ class VHFListenerApp:
             self.sdr.sample_rate = 2.048e6  # RTL-SDR's supported sample rate
             self.sdr.center_freq = frequency
             self.sdr.gain = 'auto'
-            self.sdr.set_direct_sampling(0)  # Disable direct sampling for VHF frequencies
 
             self.running = True
             self.start_btn.config(state=tk.DISABLED)
@@ -133,11 +160,6 @@ class VHFListenerApp:
             self.stop_listening()
 
 def main():
-    # Cross-platform ALSA noise suppression
-    if platform.system() == "Linux":
-        os.environ["ALSA_CARD"] = "0"
-        os.environ["PYTHONWARNINGS"] = "ignore"
-
     root = tk.Tk()
     app = VHFListenerApp(root)
     root.protocol("WM_DELETE_WINDOW", app.stop_listening)
