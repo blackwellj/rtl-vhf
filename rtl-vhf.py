@@ -1,115 +1,92 @@
-import sys
-import numpy as np
-from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QVBoxLayout, QWidget, QPushButton, QLabel, QComboBox, QTextEdit
-)
-from pyrtlsdr import RtlSdr
+import os
+import tkinter as tk
+from tkinter import ttk, messagebox
+from rtlsdr import RtlSdr
 import pyaudio
+import numpy as np
+import threading
 
-# Marine VHF frequencies (MHz)
-MARINE_VHF_CHANNELS = {
-    "Ch 16 (Distress)": 156.8,
-    "Ch 06": 156.3,
-    "Ch 08": 156.4,
-    "Ch 09": 156.45,
-    "Ch 10": 156.5,
-    "Ch 11": 156.55,
-}
-
-class MarineVHFApp(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("Marine VHF Listener")
-        self.setGeometry(100, 100, 600, 400)
+class VHFListenerApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Marine VHF Listener")
+        self.root.geometry("400x300")
         
-        # SDR and Audio Setup
         self.sdr = None
         self.audio_stream = None
+        self.running = False
         
-        # GUI Layout
-        self.central_widget = QWidget()
-        self.layout = QVBoxLayout(self.central_widget)
-        self.setCentralWidget(self.central_widget)
-        
-        self.channel_selector = QComboBox()
-        for channel_name in MARINE_VHF_CHANNELS.keys():
-            self.channel_selector.addItem(channel_name)
-        self.layout.addWidget(QLabel("Select Channel:"))
-        self.layout.addWidget(self.channel_selector)
-        
-        self.log_area = QTextEdit()
-        self.log_area.setReadOnly(True)
-        self.layout.addWidget(QLabel("Logs:"))
-        self.layout.addWidget(self.log_area)
-        
-        self.start_button = QPushButton("Start Listening")
-        self.start_button.clicked.connect(self.start_listening)
-        self.layout.addWidget(self.start_button)
-        
-        self.stop_button = QPushButton("Stop Listening")
-        self.stop_button.setEnabled(False)
-        self.stop_button.clicked.connect(self.stop_listening)
-        self.layout.addWidget(self.stop_button)
-    
+        # GUI Elements
+        self.setup_gui()
+
+    def setup_gui(self):
+        ttk.Label(self.root, text="Center Frequency (MHz):").grid(row=0, column=0, pady=10, padx=10)
+        self.freq_entry = ttk.Entry(self.root)
+        self.freq_entry.grid(row=0, column=1, pady=10, padx=10)
+
+        ttk.Label(self.root, text="Sample Rate (MS/s):").grid(row=1, column=0, pady=10, padx=10)
+        self.sr_entry = ttk.Entry(self.root)
+        self.sr_entry.insert(0, "2.048")
+        self.sr_entry.grid(row=1, column=1, pady=10, padx=10)
+
+        self.start_btn = ttk.Button(self.root, text="Start Listening", command=self.start_listening)
+        self.start_btn.grid(row=2, column=0, columnspan=2, pady=10)
+
+        self.stop_btn = ttk.Button(self.root, text="Stop Listening", command=self.stop_listening, state=tk.DISABLED)
+        self.stop_btn.grid(row=3, column=0, columnspan=2, pady=10)
+
     def start_listening(self):
-        selected_channel = self.channel_selector.currentText()
-        frequency = MARINE_VHF_CHANNELS[selected_channel] * 1e6  # Convert MHz to Hz
-        self.log_area.append(f"Starting SDR on {selected_channel} ({frequency/1e6} MHz)...")
-        
         try:
-            # Setup SDR
+            frequency = float(self.freq_entry.get()) * 1e6
+            sample_rate = float(self.sr_entry.get()) * 1e6
             self.sdr = RtlSdr()
-            self.sdr.sample_rate = 2.048e6  # Hz
-            self.sdr.center_freq = frequency  # Hz
-            self.sdr.gain = 40  # Adjust as needed
-            
-            # Setup Audio
-            self.audio_stream = pyaudio.PyAudio().open(
+            self.sdr.sample_rate = sample_rate
+            self.sdr.center_freq = frequency
+            self.sdr.gain = 'auto'
+
+            self.running = True
+            self.start_btn.config(state=tk.DISABLED)
+            self.stop_btn.config(state=tk.NORMAL)
+
+            threading.Thread(target=self.stream_audio, daemon=True).start()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to start SDR: {e}")
+
+    def stop_listening(self):
+        self.running = False
+        if self.audio_stream:
+            self.audio_stream.stop_stream()
+            self.audio_stream.close()
+        if self.sdr:
+            self.sdr.close()
+
+        self.start_btn.config(state=tk.NORMAL)
+        self.stop_btn.config(state=tk.DISABLED)
+
+    def stream_audio(self):
+        try:
+            p = pyaudio.PyAudio()
+            self.audio_stream = p.open(
                 format=pyaudio.paInt16,
                 channels=1,
                 rate=int(self.sdr.sample_rate),
-                output=True,
+                output=True
             )
-            
-            self.stop_button.setEnabled(True)
-            self.start_button.setEnabled(False)
-            
-            # Start Receiving
-            self.receive_samples()
+
+            while self.running:
+                samples = self.sdr.read_samples(256 * 1024)
+                audio_data = np.real(samples).astype(np.int16).tobytes()
+                self.audio_stream.write(audio_data)
         except Exception as e:
-            self.log_area.append(f"Error: {e}")
-    
-    def receive_samples(self):
-        try:
-            for samples in self.sdr.stream(num_samples=2048):
-                # Process samples (e.g., demodulate FM, apply filters)
-                processed_audio = np.int16(samples * 32767)  # Example processing
-                self.audio_stream.write(processed_audio.tobytes())
-        except Exception as e:
-            self.log_area.append(f"Stream stopped: {e}")
-    
-    def stop_listening(self):
-        self.log_area.append("Stopping SDR...")
-        try:
-            if self.sdr:
-                self.sdr.close()
-            if self.audio_stream:
-                self.audio_stream.close()
-        except Exception as e:
-            self.log_area.append(f"Error while stopping: {e}")
+            messagebox.showerror("Error", f"Audio streaming error: {e}")
         finally:
-            self.sdr = None
-            self.audio_stream = None
-            self.start_button.setEnabled(True)
-            self.stop_button.setEnabled(False)
-            self.log_area.append("SDR stopped.")
-    
-    def closeEvent(self, event):
-        self.stop_listening()
-        event.accept()
+            self.stop_listening()
+
+def main():
+    root = tk.Tk()
+    app = VHFListenerApp(root)
+    root.protocol("WM_DELETE_WINDOW", app.stop_listening)
+    root.mainloop()
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = MarineVHFApp()
-    window.show()
-    sys.exit(app.exec_())
+    main()
