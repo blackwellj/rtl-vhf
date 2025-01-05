@@ -4,6 +4,7 @@ from rtlsdr import RtlSdr
 import pyaudio
 import numpy as np
 import threading
+from scipy.signal import decimate
 
 # Marine VHF Channel Frequencies (MHz)
 VHF_CHANNELS = {
@@ -49,7 +50,7 @@ class VHFListenerApp:
             frequency = VHF_CHANNELS[selected_channel] * 1e6  # Convert MHz to Hz
 
             self.sdr = RtlSdr()
-            self.sdr.sample_rate = 2.048e6  # Fixed sample rate for Marine VHF
+            self.sdr.sample_rate = 2.048e6  # RTL-SDR's supported sample rate
             self.sdr.center_freq = frequency
             self.sdr.gain = 'auto'
 
@@ -75,16 +76,22 @@ class VHFListenerApp:
     def stream_audio(self):
         try:
             p = pyaudio.PyAudio()
+            audio_rate = 48000  # Output sample rate
+            decimation_factor = int(self.sdr.sample_rate // audio_rate)
+
             self.audio_stream = p.open(
                 format=pyaudio.paInt16,
                 channels=1,
-                rate=int(self.sdr.sample_rate),
+                rate=audio_rate,
                 output=True
             )
 
             while self.running:
                 samples = self.sdr.read_samples(256 * 1024)
-                audio_data = np.real(samples).astype(np.int16).tobytes()
+                # Perform decimation to reduce sample rate
+                filtered_samples = decimate(samples, decimation_factor, zero_phase=True)
+                # Convert to int16 format for audio playback
+                audio_data = np.real(filtered_samples).astype(np.int16).tobytes()
                 self.audio_stream.write(audio_data)
         except Exception as e:
             messagebox.showerror("Error", f"Audio streaming error: {e}")
