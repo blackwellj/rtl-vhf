@@ -77,6 +77,9 @@ class VHFListenerApp:
         return (min(active_frequencies) + max(active_frequencies)) / 2
 
     def bandpass_filter(self, data, lowcut, highcut, fs):
+        # Ensure lowcut and highcut are positive and valid
+        if lowcut < 0 or highcut <= 0 or highcut <= lowcut:
+            raise ValueError("Invalid filter critical frequencies")
         sos = butter(4, [lowcut / (0.5 * fs), highcut / (0.5 * fs)], btype='band', output='sos')
         return sosfilt(sos, data)
 
@@ -86,9 +89,11 @@ class VHFListenerApp:
         shifted = samples * shift
 
         # Band-pass filter the channel
-        filtered = self.bandpass_filter(shifted, -CHANNEL_BANDWIDTH / 2, CHANNEL_BANDWIDTH / 2, SAMPLE_RATE)
+        lowcut = 0
+        highcut = CHANNEL_BANDWIDTH
+        filtered = self.bandpass_filter(shifted, lowcut, highcut, SAMPLE_RATE)
 
-        # Demodulate (FM)
+        # Demodulate FM (extract the instantaneous frequency)
         demodulated = np.diff(np.unwrap(np.angle(filtered)))
         return demodulated
 
