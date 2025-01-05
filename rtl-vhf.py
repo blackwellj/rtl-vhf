@@ -1,10 +1,9 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 from rtlsdr import RtlSdr
-import pyaudio
 import numpy as np
 import threading
-from scipy.signal import decimate
+from scipy.signal import butter, sosfilt
 
 # Full UK Marine VHF Channel Frequencies (MHz)
 VHF_CHANNELS = {
@@ -16,19 +15,18 @@ VHF_CHANNELS = {
     "Lifeguard L1 (161.425 MHz)": 161.425,  # RNLI Lifeguards
 }
 
+CHANNEL_BANDWIDTH = 12.5e3  # 12.5 kHz for NFM
+SAMPLE_RATE = 2.048e6  # RTL-SDR sample rate
+
 class VHFListenerApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Marine VHF Listener")
         self.root.geometry("600x400")
 
-        self.sdrs = {}
-        self.running = {}
-        self.audio_streams = {}
-        self.signal_levels = {}
-
-        self.audio_device_index = None  # Default to None (use system's default device)
-        self.p = pyaudio.PyAudio()
+        self.sdr = None
+        self.running = False
+        self.channels_active = {}
 
         self.setup_gui()
 
@@ -37,107 +35,94 @@ class VHFListenerApp:
         
         # Create buttons for each channel
         for i, (channel_name, freq) in enumerate(VHF_CHANNELS.items()):
-            button = ttk.Button(self.root, text=channel_name, command=lambda cn=channel_name, f=freq: self.toggle_channel(cn, f))
+            button = ttk.Button(self.root, text=channel_name, command=lambda cn=channel_name: self.toggle_channel(cn))
             button.grid(row=1 + i, column=0, pady=5, padx=10, sticky="w")
             
-            # Signal strength indicator
-            self.signal_levels[channel_name] = tk.StringVar(value="Signal: ---")
-            signal_label = ttk.Label(self.root, textvariable=self.signal_levels[channel_name])
-            signal_label.grid(row=1 + i, column=1, pady=5, padx=10, sticky="w")
+            # Status indicator
+            self.channels_active[channel_name] = tk.StringVar(value="Inactive")
+            status_label = ttk.Label(self.root, textvariable=self.channels_active[channel_name])
+            status_label.grid(row=1 + i, column=1, pady=5, padx=10, sticky="w")
 
-        ttk.Button(self.root, text="Audio Settings", command=self.audio_settings).grid(row=len(VHF_CHANNELS) + 2, column=0, pady=10, padx=10, columnspan=2)
+        ttk.Button(self.root, text="Start Listening", command=self.start_listening).grid(row=len(VHF_CHANNELS) + 2, column=0, pady=10, padx=10, columnspan=2)
 
-    def audio_settings(self):
-        settings_window = tk.Toplevel(self.root)
-        settings_window.title("Audio Settings")
-        settings_window.geometry("400x300")
-
-        ttk.Label(settings_window, text="Select Audio Output Device:").pack(pady=10)
-        device_list = [self.p.get_device_info_by_index(i)['name'] for i in range(self.p.get_device_count())]
-        self.device_var = tk.StringVar(value=device_list[0] if device_list else "Default")
-        device_menu = ttk.Combobox(settings_window, textvariable=self.device_var, values=device_list, width=50)
-        device_menu.pack(pady=10)
-
-        def save_settings():
-            selected_device_name = self.device_var.get()
-            for i in range(self.p.get_device_count()):
-                if self.p.get_device_info_by_index(i)['name'] == selected_device_name:
-                    self.audio_device_index = i
-                    messagebox.showinfo("Settings", f"Audio device set to: {selected_device_name}")
-                    settings_window.destroy()
-                    return
-            messagebox.showerror("Settings", "Selected audio device not found.")
-
-        save_btn = ttk.Button(settings_window, text="Save", command=save_settings)
-        save_btn.pack(pady=20)
-
-    def toggle_channel(self, channel_name, frequency):
-        if channel_name in self.running and self.running[channel_name]:
-            self.stop_channel(channel_name)
+    def toggle_channel(self, channel_name):
+        if self.channels_active[channel_name].get() == "Active":
+            self.channels_active[channel_name].set("Inactive")
         else:
-            self.start_channel(channel_name, frequency)
+            self.channels_active[channel_name].set("Active")
 
-    def start_channel(self, channel_name, frequency):
+    def start_listening(self):
+        if self.sdr is not None:
+            messagebox.showinfo("Info", "Already monitoring. Stop the current session before starting a new one.")
+            return
+
         try:
-            sdr = RtlSdr()
-            sdr.sample_rate = 2.048e6
-            sdr.center_freq = frequency * 1e6  # Convert MHz to Hz
-            sdr.gain = 'auto'
+            # Initialize SDR
+            self.sdr = RtlSdr()
+            self.sdr.sample_rate = SAMPLE_RATE
+            self.sdr.center_freq = self.calculate_center_frequency() * 1e6
+            self.sdr.gain = 'auto'
 
-            self.sdrs[channel_name] = sdr
-            self.running[channel_name] = True
-
-            threading.Thread(target=self.stream_audio, args=(channel_name,), daemon=True).start()
+            self.running = True
+            threading.Thread(target=self.monitor_channels, daemon=True).start()
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to start SDR for {channel_name}: {e}")
+            messagebox.showerror("Error", f"Failed to start SDR: {e}")
 
-    def stop_channel(self, channel_name):
-        self.running[channel_name] = False
-        if channel_name in self.audio_streams:
-            self.audio_streams[channel_name].stop_stream()
-            self.audio_streams[channel_name].close()
-            del self.audio_streams[channel_name]
-        if channel_name in self.sdrs:
-            self.sdrs[channel_name].close()
-            del self.sdrs[channel_name]
-        self.signal_levels[channel_name].set("Signal: ---")
+    def calculate_center_frequency(self):
+        # Find the middle of the active frequencies to set as the center frequency
+        active_frequencies = [VHF_CHANNELS[ch] for ch, state in self.channels_active.items() if state.get() == "Active"]
+        if not active_frequencies:
+            messagebox.showerror("Error", "No channels selected!")
+            return 156.8  # Default to Channel 16
+        return (min(active_frequencies) + max(active_frequencies)) / 2
 
-    def stream_audio(self, channel_name):
+    def bandpass_filter(self, data, lowcut, highcut, fs):
+        sos = butter(4, [lowcut / (0.5 * fs), highcut / (0.5 * fs)], btype='band', output='sos')
+        return sosfilt(sos, data)
+
+    def demodulate_channel(self, samples, channel_freq, center_freq):
+        # Shift frequency to baseband
+        shift = np.exp(-2j * np.pi * (channel_freq - center_freq) * np.arange(len(samples)) / SAMPLE_RATE)
+        shifted = samples * shift
+
+        # Band-pass filter the channel
+        filtered = self.bandpass_filter(shifted, -CHANNEL_BANDWIDTH / 2, CHANNEL_BANDWIDTH / 2, SAMPLE_RATE)
+
+        # Demodulate (FM)
+        demodulated = np.diff(np.unwrap(np.angle(filtered)))
+        return demodulated
+
+    def monitor_channels(self):
         try:
-            audio_rate = 48000
-            sdr = self.sdrs[channel_name]
-            decimation_factor = int(sdr.sample_rate // audio_rate)
+            while self.running:
+                # Read samples from SDR
+                samples = self.sdr.read_samples(256 * 1024)
 
-            audio_stream = self.p.open(
-                format=pyaudio.paInt16,
-                channels=1,
-                rate=audio_rate,
-                output=True,
-                output_device_index=self.audio_device_index
-            )
-            self.audio_streams[channel_name] = audio_stream
+                # Process each active channel
+                for channel_name, state in self.channels_active.items():
+                    if state.get() == "Active":
+                        channel_freq = VHF_CHANNELS[channel_name] * 1e6
+                        center_freq = self.sdr.center_freq
+                        demodulated_audio = self.demodulate_channel(samples, channel_freq, center_freq)
 
-            while self.running[channel_name]:
-                samples = sdr.read_samples(256 * 1024)
-                # Calculate signal level
-                signal_level = 10 * np.log10(np.mean(np.abs(samples)**2))
-                self.signal_levels[channel_name].set(f"Signal: {signal_level:.1f} dB")
-                # Downsample for playback (use decimate or slicing as fallback)
-                try:
-                    filtered_samples = decimate(samples, decimation_factor, zero_phase=True)
-                except Exception:
-                    filtered_samples = samples[::decimation_factor]  # Simple downsampling
-                audio_data = np.real(filtered_samples).astype(np.int16).tobytes()
-                audio_stream.write(audio_data)
+                        # Here, you could send audio to speakers or save to a file
+                        print(f"Channel {channel_name}: Processed {len(demodulated_audio)} samples")
+
         except Exception as e:
-            messagebox.showerror("Error", f"Audio streaming error for {channel_name}: {e}")
+            messagebox.showerror("Error", f"Error while monitoring channels: {e}")
         finally:
-            self.stop_channel(channel_name)
+            self.stop_listening()
+
+    def stop_listening(self):
+        self.running = False
+        if self.sdr is not None:
+            self.sdr.close()
+            self.sdr = None
 
 def main():
     root = tk.Tk()
     app = VHFListenerApp(root)
-    root.protocol("WM_DELETE_WINDOW", lambda: [app.stop_channel(ch) for ch in app.running if app.running[ch]])
+    root.protocol("WM_DELETE_WINDOW", app.stop_listening)
     root.mainloop()
 
 if __name__ == "__main__":
